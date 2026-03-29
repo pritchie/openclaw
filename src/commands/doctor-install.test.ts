@@ -83,6 +83,37 @@ describe("doctor install notes", () => {
     );
   });
 
+  it("checks account-level Signal CLI paths when the top-level path is unset", async () => {
+    runCommandWithTimeoutMock.mockResolvedValue(
+      spawnResult({
+        code: 0,
+        stdout: "signal-cli 0.13.12\n",
+        stderr: "",
+      }),
+    );
+
+    await noteSignalCliVersionHealth("/home/openclaw/projects/openclaw", {
+      channels: {
+        signal: {
+          accounts: {
+            work: {
+              cliPath: "/opt/openclaw/work-signal/bin/signal-cli",
+            },
+          },
+        },
+      },
+    });
+
+    expect(runCommandWithTimeoutMock).toHaveBeenCalledWith(
+      ["/opt/openclaw/work-signal/bin/signal-cli", "--version"],
+      expect.any(Object),
+    );
+    expect(noteSpy).toHaveBeenCalledWith(
+      expect.stringContaining("channels.signal.accounts.work.cliPath"),
+      "Install",
+    );
+  });
+
   it("stays quiet when signal-cli meets the minimum version", async () => {
     runCommandWithTimeoutMock.mockResolvedValue(
       spawnResult({
