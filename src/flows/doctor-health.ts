@@ -1,6 +1,6 @@
 import { intro as clackIntro, outro as clackOutro } from "@clack/prompts";
 import { loadAndMaybeMigrateDoctorConfig } from "../commands/doctor-config-flow.js";
-import { noteSourceInstallIssues } from "../commands/doctor-install.js";
+import { noteSignalCliVersionHealth, noteSourceInstallIssues } from "../commands/doctor-install.js";
 import { noteStartupOptimizationHints } from "../commands/doctor-platform-notes.js";
 import { createDoctorPrompter, type DoctorOptions } from "../commands/doctor-prompter.js";
 import { maybeRepairUiProtocolFreshness } from "../commands/doctor-ui.js";
@@ -49,6 +49,7 @@ export async function doctorCommand(
     options,
     confirm: (p) => prompter.confirm(p),
   });
+  await noteSignalCliVersionHealth(root, configResult.cfg);
   const ctx = {
     runtime,
     options,
