@@ -114,6 +114,46 @@ describe("doctor install notes", () => {
     );
   });
 
+  it('checks the implicit "signal-cli" fallback when Signal uses local auto-start', async () => {
+    runCommandWithTimeoutMock.mockResolvedValue(
+      spawnResult({
+        code: 0,
+        stdout: "signal-cli 0.13.12\n",
+        stderr: "",
+      }),
+    );
+
+    await noteSignalCliVersionHealth("/home/openclaw/projects/openclaw", {
+      channels: {
+        signal: {
+          account: "+15550001111",
+        },
+      },
+    });
+
+    expect(runCommandWithTimeoutMock).toHaveBeenCalledWith(
+      ["signal-cli", "--version"],
+      expect.any(Object),
+    );
+    expect(noteSpy).toHaveBeenCalledWith(
+      expect.stringContaining('channels.signal.cliPath (default "signal-cli")'),
+      "Install",
+    );
+  });
+
+  it("skips the implicit default signal-cli probe when Signal uses only a remote daemon", async () => {
+    await noteSignalCliVersionHealth("/home/openclaw/projects/openclaw", {
+      channels: {
+        signal: {
+          httpUrl: "http://gateway-host:8080",
+        },
+      },
+    });
+
+    expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+    expect(noteSpy).not.toHaveBeenCalled();
+  });
+
   it("stays quiet when signal-cli meets the minimum version", async () => {
     runCommandWithTimeoutMock.mockResolvedValue(
       spawnResult({

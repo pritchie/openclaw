@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveMergedAccountConfig } from "../channels/plugins/account-helpers.js";
 import type { OpenClawConfig } from "../config/config.js";
+import type { SignalAccountConfig } from "../config/types.signal.js";
 import { compareSemverStrings } from "../infra/update-check.js";
 import { runCommandWithTimeout } from "../process/exec.js";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 import { note } from "../terminal/note.js";
 
 // Minimum signal-cli floor for the current OpenClaw Signal feature set.
@@ -15,7 +18,7 @@ const MIN_SIGNAL_CLI_VERSION = "0.13.14";
 
 type SignalCliHealthTarget = {
   cliPath: string;
-  configKey: string;
+  sourceLabels: string[];
 };
 
 function classifySignalCliInstall(params: {
@@ -59,29 +62,86 @@ async function probeSignalCliVersion(cliPath: string): Promise<string | null> {
   }
 }
 
-function listConfiguredSignalCliHealthTargets(cfg: OpenClawConfig): SignalCliHealthTarget[] {
-  const targets: SignalCliHealthTarget[] = [];
-  const seenPaths = new Set<string>();
-  const addTarget = (cliPath: string | undefined, configKey: string) => {
-    const trimmed = cliPath?.trim();
-    if (!trimmed || seenPaths.has(trimmed)) {
-      return;
-    }
-    seenPaths.add(trimmed);
-    targets.push({ cliPath: trimmed, configKey });
-  };
-
-  const signalConfig = cfg.channels?.signal;
-  addTarget(signalConfig?.cliPath, "channels.signal.cliPath");
-
-  const accountEntries = Object.entries(signalConfig?.accounts ?? {}).toSorted(([left], [right]) =>
-    left.localeCompare(right),
+function isSignalAccountConfigured(config: SignalAccountConfig): boolean {
+  return Boolean(
+    config.account?.trim() ||
+    config.httpUrl?.trim() ||
+    config.cliPath?.trim() ||
+    config.httpHost?.trim() ||
+    typeof config.httpPort === "number" ||
+    typeof config.autoStart === "boolean",
   );
-  for (const [accountId, accountCfg] of accountEntries) {
-    addTarget(accountCfg?.cliPath, `channels.signal.accounts.${accountId}.cliPath`);
+}
+
+function listSignalHealthAccountIds(cfg: OpenClawConfig): string[] {
+  const configuredIds = Object.keys(cfg.channels?.signal?.accounts ?? {})
+    .filter(Boolean)
+    .map((accountId) => normalizeAccountId(accountId))
+    .filter(Boolean);
+  return configuredIds.length > 0
+    ? [...new Set(configuredIds)].toSorted((left, right) => left.localeCompare(right))
+    : [DEFAULT_ACCOUNT_ID];
+}
+
+function listConfiguredSignalCliHealthTargets(cfg: OpenClawConfig): SignalCliHealthTarget[] {
+  const signalConfig = cfg.channels?.signal;
+  if (!signalConfig) {
+    return [];
   }
 
-  return targets;
+  const targetsByPath = new Map<string, SignalCliHealthTarget>();
+  const addTarget = (cliPath: string | undefined, sourceLabel: string) => {
+    const trimmed = cliPath?.trim();
+    if (!trimmed) {
+      return;
+    }
+    const existing = targetsByPath.get(trimmed);
+    if (existing) {
+      if (!existing.sourceLabels.includes(sourceLabel)) {
+        existing.sourceLabels.push(sourceLabel);
+        existing.sourceLabels = existing.sourceLabels.toSorted((left, right) =>
+          left.localeCompare(right),
+        );
+      }
+      return;
+    }
+    targetsByPath.set(trimmed, { cliPath: trimmed, sourceLabels: [sourceLabel] });
+  };
+
+  const accountEntries = listSignalHealthAccountIds(cfg).map((accountId) => {
+    const merged = resolveMergedAccountConfig<SignalAccountConfig>({
+      channelConfig: signalConfig as SignalAccountConfig | undefined,
+      accounts: signalConfig.accounts as Record<string, Partial<SignalAccountConfig>> | undefined,
+      accountId,
+    });
+    return { accountId, merged };
+  });
+
+  for (const { accountId, merged } of accountEntries) {
+    if (!isSignalAccountConfigured(merged)) {
+      continue;
+    }
+    const accountConfig = signalConfig.accounts?.[accountId];
+    const explicitCliPath = accountConfig?.cliPath?.trim() || signalConfig.cliPath?.trim();
+    const effectiveAutoStart = merged.autoStart ?? !merged.httpUrl?.trim();
+    if (!explicitCliPath && !effectiveAutoStart) {
+      continue;
+    }
+
+    const targetPath = explicitCliPath || "signal-cli";
+    const sourceLabel = explicitCliPath
+      ? accountConfig?.cliPath?.trim()
+        ? `channels.signal.accounts.${accountId}.cliPath`
+        : "channels.signal.cliPath"
+      : accountId === DEFAULT_ACCOUNT_ID
+        ? 'channels.signal.cliPath (default "signal-cli")'
+        : `channels.signal.accounts.${accountId}.cliPath (default "signal-cli")`;
+    addTarget(targetPath, sourceLabel);
+  }
+
+  return [...targetsByPath.values()].toSorted((left, right) =>
+    left.cliPath.localeCompare(right.cliPath),
+  );
 }
 
 export async function noteSignalCliVersionHealth(
@@ -100,7 +160,7 @@ export async function noteSignalCliVersionHealth(
       note(
         [
           `- signal-cli is configured at ${configuredTarget.cliPath} but doctor could not read its version.`,
-          `- configured in: ${configuredTarget.configKey}`,
+          `- used by: ${configuredTarget.sourceLabels.join(", ")}`,
           "- Quick check: <configured signal-cli path> --version",
         ].join("\n"),
         "Install",
@@ -117,7 +177,7 @@ export async function noteSignalCliVersionHealth(
       installKind === "workspace"
         ? [
             "- This looks like a workspace-local build, so update/rebuild the local Signal CLI in the repo and verify the configured path again.",
-            `- If you do not want workspace drift, point ${configuredTarget.configKey} at a separately installed signal-cli instead.`,
+            `- If you do not want workspace drift, point ${configuredTarget.sourceLabels.join(", ")} at a separately installed signal-cli instead.`,
           ]
         : installKind === "managed"
           ? [
@@ -125,7 +185,7 @@ export async function noteSignalCliVersionHealth(
               "- After updating, rerun doctor to verify the version floor.",
             ]
           : [
-              `- This looks like a system install, so upgrade signal-cli with your package manager or replace ${configuredTarget.configKey} with a newer binary.`,
+              `- This looks like a system install, so upgrade signal-cli with your package manager or replace ${configuredTarget.sourceLabels.join(", ")} with a newer binary.`,
               "- After updating, rerun doctor to verify the version floor.",
             ];
 
@@ -133,7 +193,7 @@ export async function noteSignalCliVersionHealth(
       [
         `- signal-cli ${version} is below the minimum supported version ${MIN_SIGNAL_CLI_VERSION} for the current OpenClaw Signal feature set.`,
         `- configured path: ${configuredTarget.cliPath}`,
-        `- configured in: ${configuredTarget.configKey}`,
+        `- used by: ${configuredTarget.sourceLabels.join(", ")}`,
         ...fixLines,
       ].join("\n"),
       "Install",
