@@ -41,6 +41,10 @@ export type CanonicalInboundMessageHookContext = {
   originatingTo?: string;
   guildId?: string;
   channelName?: string;
+  replyToId?: string;
+  replyToBody?: string;
+  replyToSender?: string;
+  replyToIsQuote?: boolean;
   isGroup: boolean;
   groupId?: string;
 };
@@ -122,6 +126,10 @@ export function deriveInboundMessageHookContext(
     originatingTo: ctx.OriginatingTo,
     guildId: ctx.GroupSpace,
     channelName: ctx.GroupChannel,
+    replyToId: ctx.ReplyToId,
+    replyToBody: ctx.ReplyToBody,
+    replyToSender: ctx.ReplyToSender,
+    replyToIsQuote: ctx.ReplyToIsQuote,
     isGroup,
     groupId: isGroup ? conversationId : undefined,
   };
@@ -353,6 +361,10 @@ export function toInternalMessageReceivedContext(
       senderE164: canonical.senderE164,
       guildId: canonical.guildId,
       channelName: canonical.channelName,
+      replyToId: canonical.replyToId,
+      replyToBody: canonical.replyToBody,
+      replyToSender: canonical.replyToSender,
+      replyToIsQuote: canonical.replyToIsQuote,
     },
   };
 }

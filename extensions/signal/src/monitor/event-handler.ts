@@ -114,6 +114,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     mediaTypes?: string[];
     commandAuthorized: boolean;
     wasMentioned?: boolean;
+    replyToId?: string;
+    replyToBody?: string;
+    replyToSender?: string;
+    replyToIsQuote?: boolean;
   };
 
   async function handleSignalInboundMessage(entry: SignalInboundEntry) {
@@ -205,6 +209,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       Provider: "signal" as const,
       Surface: "signal" as const,
       MessageSid: entry.messageId,
+      ReplyToId: entry.replyToId,
+      ReplyToBody: entry.replyToBody,
+      ReplyToSender: entry.replyToSender,
+      ReplyToIsQuote: entry.replyToIsQuote,
       Timestamp: entry.timestamp ?? undefined,
       MediaPath: entry.mediaPath,
       MediaType: entry.mediaType,
@@ -745,7 +753,18 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       }
     }
 
-    const bodyText = messageText || placeholder || dataMessage.quote?.text?.trim() || "";
+    const quote = dataMessage.quote ?? undefined;
+    const quotedText = quote?.text?.trim() || "";
+    const quotedAuthor =
+      quote?.author?.name?.trim() ||
+      quote?.author?.number?.trim() ||
+      quote?.author?.uuid?.trim() ||
+      "";
+    const quotedId =
+      quote?.id !== undefined && quote?.id !== null && String(quote.id).trim().length > 0
+        ? String(quote.id).trim()
+        : undefined;
+    const bodyText = messageText || placeholder || quotedText || "";
     if (!bodyText) {
       return;
     }
@@ -796,6 +815,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       mediaTypes: mediaTypes.length > 0 ? mediaTypes : undefined,
       commandAuthorized,
       wasMentioned: effectiveWasMentioned,
+      replyToId: quotedId,
+      replyToBody: quotedText || undefined,
+      replyToSender: quotedAuthor || undefined,
+      replyToIsQuote: quotedText ? true : undefined,
     });
   };
 }
