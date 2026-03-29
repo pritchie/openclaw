@@ -13,6 +13,11 @@ import { note } from "../terminal/note.js";
 // Newer versions are preferred, but doctor uses this as the minimum supported floor.
 const MIN_SIGNAL_CLI_VERSION = "0.13.14";
 
+type SignalCliHealthTarget = {
+  cliPath: string;
+  configKey: string;
+};
+
 function classifySignalCliInstall(params: {
   root: string | null;
   cliPath: string;
@@ -54,57 +59,86 @@ async function probeSignalCliVersion(cliPath: string): Promise<string | null> {
   }
 }
 
+function listConfiguredSignalCliHealthTargets(cfg: OpenClawConfig): SignalCliHealthTarget[] {
+  const targets: SignalCliHealthTarget[] = [];
+  const seenPaths = new Set<string>();
+  const addTarget = (cliPath: string | undefined, configKey: string) => {
+    const trimmed = cliPath?.trim();
+    if (!trimmed || seenPaths.has(trimmed)) {
+      return;
+    }
+    seenPaths.add(trimmed);
+    targets.push({ cliPath: trimmed, configKey });
+  };
+
+  const signalConfig = cfg.channels?.signal;
+  addTarget(signalConfig?.cliPath, "channels.signal.cliPath");
+
+  const accountEntries = Object.entries(signalConfig?.accounts ?? {}).toSorted(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  for (const [accountId, accountCfg] of accountEntries) {
+    addTarget(accountCfg?.cliPath, `channels.signal.accounts.${accountId}.cliPath`);
+  }
+
+  return targets;
+}
+
 export async function noteSignalCliVersionHealth(
   root: string | null,
   cfg: OpenClawConfig,
 ): Promise<void> {
-  const configuredCliPath = cfg.channels?.signal?.cliPath?.trim();
-  if (!configuredCliPath) {
+  const configuredTargets = listConfiguredSignalCliHealthTargets(cfg);
+  if (configuredTargets.length === 0) {
     return;
   }
 
-  const installKind = classifySignalCliInstall({ root, cliPath: configuredCliPath });
-  const version = await probeSignalCliVersion(configuredCliPath);
-  if (!version) {
+  for (const configuredTarget of configuredTargets) {
+    const installKind = classifySignalCliInstall({ root, cliPath: configuredTarget.cliPath });
+    const version = await probeSignalCliVersion(configuredTarget.cliPath);
+    if (!version) {
+      note(
+        [
+          `- signal-cli is configured at ${configuredTarget.cliPath} but doctor could not read its version.`,
+          `- configured in: ${configuredTarget.configKey}`,
+          "- Quick check: <configured signal-cli path> --version",
+        ].join("\n"),
+        "Install",
+      );
+      continue;
+    }
+
+    const cmp = compareSemverStrings(version, MIN_SIGNAL_CLI_VERSION);
+    if (cmp != null && cmp >= 0) {
+      continue;
+    }
+
+    const fixLines =
+      installKind === "workspace"
+        ? [
+            "- This looks like a workspace-local build, so update/rebuild the local Signal CLI in the repo and verify the configured path again.",
+            `- If you do not want workspace drift, point ${configuredTarget.configKey} at a separately installed signal-cli instead.`,
+          ]
+        : installKind === "managed"
+          ? [
+              "- This looks like an OpenClaw-managed install, so rerun the Signal CLI install/update flow to refresh it.",
+              "- After updating, rerun doctor to verify the version floor.",
+            ]
+          : [
+              `- This looks like a system install, so upgrade signal-cli with your package manager or replace ${configuredTarget.configKey} with a newer binary.`,
+              "- After updating, rerun doctor to verify the version floor.",
+            ];
+
     note(
       [
-        `- signal-cli is configured at ${configuredCliPath} but doctor could not read its version.`,
-        "- Quick check: <configured signal-cli path> --version",
+        `- signal-cli ${version} is below the minimum supported version ${MIN_SIGNAL_CLI_VERSION} for the current OpenClaw Signal feature set.`,
+        `- configured path: ${configuredTarget.cliPath}`,
+        `- configured in: ${configuredTarget.configKey}`,
+        ...fixLines,
       ].join("\n"),
       "Install",
     );
-    return;
   }
-
-  const cmp = compareSemverStrings(version, MIN_SIGNAL_CLI_VERSION);
-  if (cmp != null && cmp >= 0) {
-    return;
-  }
-
-  const fixLines =
-    installKind === "workspace"
-      ? [
-          "- This looks like a workspace-local build, so update/rebuild the local Signal CLI in the repo and verify the configured path again.",
-          "- If you do not want workspace drift, point channels.signal.cliPath at a separately installed signal-cli instead.",
-        ]
-      : installKind === "managed"
-        ? [
-            "- This looks like an OpenClaw-managed install, so rerun the Signal CLI install/update flow to refresh it.",
-            "- After updating, rerun doctor to verify the version floor.",
-          ]
-        : [
-            "- This looks like a system install, so upgrade signal-cli with your package manager or replace channels.signal.cliPath with a newer binary.",
-            "- After updating, rerun doctor to verify the version floor.",
-          ];
-
-  note(
-    [
-      `- signal-cli ${version} is below the minimum supported version ${MIN_SIGNAL_CLI_VERSION} for the current OpenClaw Signal feature set.`,
-      `- configured path: ${configuredCliPath}`,
-      ...fixLines,
-    ].join("\n"),
-    "Install",
-  );
 }
 
 export function noteSourceInstallIssues(root: string | null) {
