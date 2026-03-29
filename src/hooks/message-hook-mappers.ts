@@ -299,6 +299,10 @@ export function toPluginInboundClaimEvent(
       guildId: canonical.guildId,
       channelName: canonical.channelName,
       groupId: canonical.groupId,
+      replyToId: canonical.replyToId,
+      replyToBody: canonical.replyToBody,
+      replyToSender: canonical.replyToSender,
+      replyToIsQuote: canonical.replyToIsQuote,
     },
   };
 }
@@ -324,6 +328,10 @@ export function toPluginMessageReceivedEvent(
       senderE164: canonical.senderE164,
       guildId: canonical.guildId,
       channelName: canonical.channelName,
+      replyToId: canonical.replyToId,
+      replyToBody: canonical.replyToBody,
+      replyToSender: canonical.replyToSender,
+      replyToIsQuote: canonical.replyToIsQuote,
     },
   };
 }
