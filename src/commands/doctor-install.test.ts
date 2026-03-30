@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SpawnResult } from "../process/exec.js";
 
-vi.mock("../terminal/note.js", () => ({
+type SignalProbeResult = {
+  ok: boolean;
+  status: number;
+  error: string | null;
+  elapsedMs: number;
+  version: string | null;
+};
+
+const mocks = vi.hoisted(() => ({
   note: vi.fn(),
-}));
-
-vi.mock("../process/exec.js", () => ({
   runCommandWithTimeout: vi.fn(),
-}));
-
-vi.mock("../plugin-sdk/signal.js", () => ({
   probeSignal: vi.fn(),
 }));
 
-import { probeSignal } from "../plugin-sdk/signal.js";
-import { runCommandWithTimeout, type SpawnResult } from "../process/exec.js";
-import { note } from "../terminal/note.js";
-import { noteSignalCliVersionHealth } from "./doctor-install.js";
+let noteSignalCliVersionHealth: typeof import("./doctor-install.js").noteSignalCliVersionHealth;
 
 function spawnResult(partial: Partial<SpawnResult>): SpawnResult {
   return {
@@ -29,9 +29,7 @@ function spawnResult(partial: Partial<SpawnResult>): SpawnResult {
   };
 }
 
-function signalProbe(
-  partial: Partial<Awaited<ReturnType<typeof probeSignal>>>,
-): Awaited<ReturnType<typeof probeSignal>> {
+function signalProbe(partial: Partial<SignalProbeResult>): SignalProbeResult {
   return {
     ok: true,
     status: 200,
@@ -43,14 +41,28 @@ function signalProbe(
 }
 
 describe("doctor install notes", () => {
-  const noteSpy = vi.mocked(note);
-  const probeSignalMock = vi.mocked(probeSignal);
-  const runCommandWithTimeoutMock = vi.mocked(runCommandWithTimeout);
+  const noteSpy = mocks.note;
+  const probeSignalMock = mocks.probeSignal;
+  const runCommandWithTimeoutMock = mocks.runCommandWithTimeout;
 
   beforeEach(() => {
-    noteSpy.mockClear();
+    vi.resetModules();
+    noteSpy.mockReset();
     probeSignalMock.mockReset();
     runCommandWithTimeoutMock.mockReset();
+  });
+
+  beforeEach(async () => {
+    vi.doMock("../terminal/note.js", () => ({
+      note: noteSpy,
+    }));
+    vi.doMock("../process/exec.js", () => ({
+      runCommandWithTimeout: runCommandWithTimeoutMock,
+    }));
+    vi.doMock("../plugin-sdk/signal-surface.js", () => ({
+      probeSignal: probeSignalMock,
+    }));
+    ({ noteSignalCliVersionHealth } = await import("./doctor-install.js"));
   });
 
   it("warns from the daemon version for workspace-local auto-start installs", async () => {

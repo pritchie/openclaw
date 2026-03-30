@@ -4,7 +4,7 @@ import { resolveMergedAccountConfig } from "../channels/plugins/account-helpers.
 import type { OpenClawConfig } from "../config/config.js";
 import type { SignalAccountConfig } from "../config/types.signal.js";
 import { compareSemverStrings } from "../infra/update-check.js";
-import { probeSignal } from "../plugin-sdk/signal.js";
+import { probeSignal } from "../plugin-sdk/signal-surface.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 import { note } from "../terminal/note.js";
